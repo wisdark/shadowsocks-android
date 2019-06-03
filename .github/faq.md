@@ -3,21 +3,14 @@
 Cannot connect to server:
 
 1. Stop battery saver if it's active;
-2. If an upgrade breaks anything, do a manual reset first by pressing Reset at the end of the list;
-3. Check your config;
-4. Wipe app data.
+2. Check your config;
+3. Wipe app data.
 
 Crash: [Submit an issue](https://github.com/shadowsocks/shadowsocks-android/issues/new) with logcat attached, or submit a crash report to Google Play. Then, try wiping app data.
 
-### UI tips
+### How to create a widget and/or switch profile based on network connectivity?
 
-* Tap the number to enter the port you wish to use; (if the keyboard doesn't pop up automatically for some reason)
-* Use Tasker integration to create a desktop widget.
-
-### How to add QR code from local gallery?
-
-Scan it with a third-party scanner like [QuickMark Barcode Scanner](https://play.google.com/store/apps/details?id=tw.com.quickmark) and click the `ss` url.
-
+Use [Tasker](http://tasker.dinglisch.net/) integration.
 
 ### Why is NAT mode deprecated?
 
@@ -33,12 +26,18 @@ The exclamation mark in the Wi-Fi/cellular icon appears because the system fails
 
 1. Some ROM has broken VPNService implementation, especially for IPv6;
 2. Some ROM has aggressive (or called broken) background service killing policy;
-3. If you have Xposed framework and/or battery saver apps, it's likely that this app wouldn't work well with these either.
+3. Some ROM like [Flyme](https://github.com/shadowsocks/shadowsocks-android/issues/1821) is basically broken **in every way possible**;
+4. If you have Xposed framework and/or battery saver apps, it's likely that this app wouldn't work well with these either.
 
 * Fixes for MIUI: [#772](https://github.com/shadowsocks/shadowsocks-android/issues/772)
+* Fixes for EMUI: [#888](https://github.com/shadowsocks/shadowsocks-android/issues/888)
 * Fixes for Huawei: [#1091 (comment)](https://github.com/shadowsocks/shadowsocks-android/issues/1091#issuecomment-276949836)
 * Related to Xposed: [#1414](https://github.com/shadowsocks/shadowsocks-android/issues/1414)
 * Samsung and/or Brevent: [#1410](https://github.com/shadowsocks/shadowsocks-android/issues/1410)
+* Another Samsung: [#1712](https://github.com/shadowsocks/shadowsocks-android/issues/1712)
+* Samsung with GMS: [#2138](https://github.com/shadowsocks/shadowsocks-android/issues/2138)
+* Don't install this app on SD card because of permission issues: [#1124 (comment)](https://github.com/shadowsocks/shadowsocks-android/issues/1124#issuecomment-307556453)
+* `INTERACT_ACROSS_USERS` permission missing: [#1184](https://github.com/shadowsocks/shadowsocks-android/issues/1184)
 
 ### How to pause Shadowsocks service?
 
@@ -58,9 +57,36 @@ More details: https://kb.adguard.com/en/android/solving-problems/battery
 
 Allow this app to consume background data in app settings.
 
-### Why Camera permission is required on devices below Android 6.0?
+### How to use Transproxy mode?
 
-To scan the QR code through the integrated QR scanner.
-
-By the way, upgrade your Android system already.
-
+1. Install [AFWall+](https://github.com/ukanth/afwall);
+2. Set custom script:
+```sh
+IP6TABLES=/system/bin/ip6tables
+IPTABLES=/system/bin/iptables
+ULIMIT=/system/bin/ulimit
+SHADOWSOCKS_UID=`dumpsys package com.github.shadowsocks | grep userId | cut -d= -f2 - | cut -d' ' -f1 -`
+PORT_DNS=5450
+PORT_TRANSPROXY=8200
+$ULIMIT -n 4096
+$IP6TABLES -F
+$IP6TABLES -A INPUT -j DROP
+$IP6TABLES -A OUTPUT -j DROP
+$IPTABLES -t nat -F OUTPUT
+$IPTABLES -t nat -A OUTPUT -o lo -j RETURN
+$IPTABLES -t nat -A OUTPUT -d 127.0.0.1 -j RETURN
+$IPTABLES -t nat -A OUTPUT -m owner --uid-owner $SHADOWSOCKS_UID -j RETURN
+$IPTABLES -t nat -A OUTPUT -p tcp --dport 53 -j DNAT --to-destination 127.0.0.1:$PORT_DNS
+$IPTABLES -t nat -A OUTPUT -p udp --dport 53 -j DNAT --to-destination 127.0.0.1:$PORT_DNS
+$IPTABLES -t nat -A OUTPUT -p tcp -j DNAT --to-destination 127.0.0.1:$PORT_TRANSPROXY
+$IPTABLES -t nat -A OUTPUT -p udp -j DNAT --to-destination 127.0.0.1:$PORT_TRANSPROXY
+```
+3. Set custom shutdown script:
+```sh
+IP6TABLES=/system/bin/ip6tables
+IPTABLES=/system/bin/iptables
+$IPTABLES -t nat -F OUTPUT
+$IP6TABLES -F
+```
+4. Make sure to allow traffic for Shadowsocks;
+5. Start Shadowsocks transproxy service and enable firewall.
