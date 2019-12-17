@@ -117,8 +117,7 @@ class Acl {
         var subnets: SortedList<Subnet>? = if (defaultBypass) proxySubnets else bypassSubnets
         reader.useLines {
             for (line in it) {
-                @Suppress("PLATFORM_CLASS_MAPPED_TO_KOTLIN")
-                val blocks = (line as java.lang.String).split("#", 2)
+                val blocks = line.split('#', limit = 2)
                 val url = networkAclParser.matchEntire(blocks.getOrElse(1) { "" })?.groupValues?.getOrNull(1)
                 if (url != null) urls.add(URL(url))
                 when (val input = blocks[0].trim()) {
@@ -153,13 +152,8 @@ class Acl {
 
     suspend fun flatten(depth: Int, connect: suspend (URL) -> URLConnection): Acl {
         if (depth > 0) for (url in urls.asIterable()) {
-            val child = Acl()
-            try {
-                child.fromReader(connect(url).getInputStream().bufferedReader(), bypass).flatten(depth - 1, connect)
-            } catch (e: IOException) {
-                e.printStackTrace()
-                continue
-            }
+            val child = Acl().fromReader(connect(url).getInputStream().bufferedReader(), bypass)
+            child.flatten(depth - 1, connect)
             if (bypass != child.bypass) {
                 Crashlytics.log(Log.WARN, TAG, "Imported network ACL has a conflicting mode set. " +
                         "This will probably not work as intended. URL: $url")

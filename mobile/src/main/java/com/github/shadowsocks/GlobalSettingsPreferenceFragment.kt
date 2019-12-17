@@ -24,6 +24,7 @@ import android.app.Activity
 import android.content.Intent
 import android.os.Build
 import android.os.Bundle
+import android.view.View
 import androidx.preference.EditTextPreference
 import androidx.preference.Preference
 import androidx.preference.PreferenceFragmentCompat
@@ -38,6 +39,7 @@ import com.github.shadowsocks.preference.EditTextPreferenceModifiers
 import com.github.shadowsocks.preference.HostsSummaryProvider
 import com.github.shadowsocks.utils.readableMessage
 import com.github.shadowsocks.utils.remove
+import com.github.shadowsocks.widget.MainListListener
 
 class GlobalSettingsPreferenceFragment : PreferenceFragmentCompat() {
     companion object {
@@ -78,15 +80,15 @@ class GlobalSettingsPreferenceFragment : PreferenceFragmentCompat() {
             tfo.summary = getString(R.string.tcp_fastopen_summary_unsupported, System.getProperty("os.version"))
         }
 
-        hosts.onBindEditTextListener = EditTextPreferenceModifiers.Monospace
+        hosts.setOnBindEditTextListener(EditTextPreferenceModifiers.Monospace)
         hosts.summaryProvider = HostsSummaryProvider
         val serviceMode = findPreference<Preference>(Key.serviceMode)!!
         val portProxy = findPreference<EditTextPreference>(Key.portProxy)!!
-        portProxy.onBindEditTextListener = EditTextPreferenceModifiers.Port
+        portProxy.setOnBindEditTextListener(EditTextPreferenceModifiers.Port)
         val portLocalDns = findPreference<EditTextPreference>(Key.portLocalDns)!!
-        portLocalDns.onBindEditTextListener = EditTextPreferenceModifiers.Port
+        portLocalDns.setOnBindEditTextListener(EditTextPreferenceModifiers.Port)
         val portTransproxy = findPreference<EditTextPreference>(Key.portTransproxy)!!
-        portTransproxy.onBindEditTextListener = EditTextPreferenceModifiers.Port
+        portTransproxy.setOnBindEditTextListener(EditTextPreferenceModifiers.Port)
         val onServiceModeChange = Preference.OnPreferenceChangeListener { _, newValue ->
             val (enabledLocalDns, enabledTransproxy) = when (newValue as String?) {
                 Key.modeProxy -> Pair(false, false)
@@ -115,11 +117,16 @@ class GlobalSettingsPreferenceFragment : PreferenceFragmentCompat() {
         serviceMode.onPreferenceChangeListener = onServiceModeChange
     }
 
+    override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
+        super.onViewCreated(view, savedInstanceState)
+        listView.setOnApplyWindowInsetsListener(MainListListener)
+    }
+
     override fun onDisplayPreferenceDialog(preference: Preference?) {
         if (preference == hosts) BrowsableEditTextPreferenceDialogFragment().apply {
             setKey(hosts.key)
             setTargetFragment(this@GlobalSettingsPreferenceFragment, REQUEST_BROWSE)
-        }.show(fragmentManager ?: return, hosts.key) else super.onDisplayPreferenceDialog(preference)
+        }.show(parentFragmentManager, hosts.key) else super.onDisplayPreferenceDialog(preference)
     }
 
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
@@ -130,7 +137,7 @@ class GlobalSettingsPreferenceFragment : PreferenceFragmentCompat() {
                 try {
                     // we read and persist all its content here to avoid content URL permission issues
                     hosts.text = activity.contentResolver.openInputStream(data!!.data!!)!!.bufferedReader().readText()
-                } catch (e: RuntimeException) {
+                } catch (e: Exception) {
                     activity.snackbar(e.readableMessage).show()
                 }
             }

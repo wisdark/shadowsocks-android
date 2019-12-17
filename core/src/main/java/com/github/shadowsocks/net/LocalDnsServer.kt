@@ -22,10 +22,10 @@ package com.github.shadowsocks.net
 
 import android.util.Log
 import com.crashlytics.android.Crashlytics
+import com.github.shadowsocks.bg.BaseService
 import com.github.shadowsocks.utils.printLog
 import kotlinx.coroutines.*
 import org.xbill.DNS.*
-import java.io.EOFException
 import java.io.IOException
 import java.net.*
 import java.nio.ByteBuffer
@@ -79,18 +79,24 @@ class LocalDnsServer(private val localResolver: suspend (String) -> Array<InetAd
                     for (address in results) addRecord(when (address) {
                         is Inet4Address -> ARecord(question.name, DClass.IN, TTL, address)
                         is Inet6Address -> AAAARecord(question.name, DClass.IN, TTL, address)
-                        else -> throw IllegalStateException("Unsupported address $address")
+                        else -> error("Unsupported address $address")
                     }, Section.ANSWER)
                 }.toWire())
     }
 
     private val monitor = ChannelMonitor()
 
-    override val coroutineContext = SupervisorJob() + CoroutineExceptionHandler { _, t -> printLog(t) }
+    override val coroutineContext = SupervisorJob() + CoroutineExceptionHandler { _, t ->
+        if (t is IOException) Crashlytics.log(Log.WARN, TAG, t.message) else printLog(t)
+    }
 
     suspend fun start(listen: SocketAddress) = DatagramChannel.open().run {
         configureBlocking(false)
-        socket().bind(listen)
+        try {
+            socket().bind(listen)
+        } catch (e: BindException) {
+            throw BaseService.ExpectedExceptionWrapper(e)
+        }
         monitor.register(this, SelectionKey.OP_READ) { handlePacket(this) }
     }
 
@@ -108,7 +114,7 @@ class LocalDnsServer(private val localResolver: suspend (String) -> Array<InetAd
         val request = try {
             Message(packet)
         } catch (e: IOException) {  // we cannot parse the message, do not attempt to handle it at all
-            printLog(e)
+            Crashlytics.log(Log.WARN, TAG, e.message)
             return forward(packet)
         }
         return supervisorScope {
@@ -126,7 +132,7 @@ class LocalDnsServer(private val localResolver: suspend (String) -> Array<InetAd
                 if (forwardOnly) return@supervisorScope remote.await()
                 if (remoteDomainMatcher?.containsMatchIn(host) == true) return@supervisorScope remote.await()
                 val localResults = try {
-                    withTimeout(TIMEOUT) { GlobalScope.async(Dispatchers.IO) { localResolver(host) }.await() }
+                    withTimeout(TIMEOUT) { localResolver(host) }
                 } catch (_: TimeoutCancellationException) {
                     Crashlytics.log(Log.WARN, TAG, "Local resolving timed out, falling back to remote resolving")
                     return@supervisorScope remote.await()
@@ -143,7 +149,7 @@ class LocalDnsServer(private val localResolver: suspend (String) -> Array<InetAd
                 when (e) {
                     is TimeoutCancellationException -> Crashlytics.log(Log.WARN, TAG, "Remote resolving timed out")
                     is CancellationException -> { } // ignore
-                    is EOFException -> Crashlytics.log(Log.WARN, TAG, e.message)
+                    is IOException -> Crashlytics.log(Log.WARN, TAG, e.message)
                     else -> printLog(e)
                 }
                 ByteBuffer.wrap(prepareDnsResponse(request).apply {

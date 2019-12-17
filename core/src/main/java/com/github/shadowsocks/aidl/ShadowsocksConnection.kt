@@ -24,7 +24,6 @@ import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.content.ServiceConnection
-import android.os.DeadObjectException
 import android.os.Handler
 import android.os.IBinder
 import android.os.RemoteException
@@ -85,21 +84,21 @@ class ShadowsocksConnection(private val handler: Handler = Handler(),
 
     var bandwidthTimeout = 0L
         set(value) {
-            val service = service
-            if (bandwidthTimeout != value && service != null)
-                if (value > 0) service.startListeningForBandwidth(serviceCallback, value) else try {
-                    service.stopListeningForBandwidth(serviceCallback)
-                } catch (_: DeadObjectException) { }
+            try {
+                if (value > 0) service?.startListeningForBandwidth(serviceCallback, value)
+                else service?.stopListeningForBandwidth(serviceCallback)
+            } catch (_: RemoteException) { }
             field = value
         }
     var service: IShadowsocksService? = null
 
     override fun onServiceConnected(name: ComponentName?, binder: IBinder) {
         this.binder = binder
-        if (listenForDeath) binder.linkToDeath(this, 0)
         val service = IShadowsocksService.Stub.asInterface(binder)!!
         this.service = service
-        if (!callbackRegistered) try {
+        try {
+            if (listenForDeath) binder.linkToDeath(this, 0)
+            check(!callbackRegistered)
             service.registerCallback(serviceCallback)
             callbackRegistered = true
             if (bandwidthTimeout > 0) service.startListeningForBandwidth(serviceCallback, bandwidthTimeout)
@@ -116,6 +115,7 @@ class ShadowsocksConnection(private val handler: Handler = Handler(),
 
     override fun binderDied() {
         service = null
+        callbackRegistered = false
         callback?.also { handler.post(it::onBinderDied) }
     }
 
@@ -144,7 +144,9 @@ class ShadowsocksConnection(private val handler: Handler = Handler(),
         connectionActive = false
         if (listenForDeath) binder?.unlinkToDeath(this, 0)
         binder = null
-        service?.stopListeningForBandwidth(serviceCallback)
+        try {
+            service?.stopListeningForBandwidth(serviceCallback)
+        } catch (_: RemoteException) { }
         service = null
         callback = null
     }

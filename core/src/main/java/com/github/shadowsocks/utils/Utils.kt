@@ -20,10 +20,8 @@
 
 package com.github.shadowsocks.utils
 
-import android.content.BroadcastReceiver
-import android.content.ContentResolver
-import android.content.Context
-import android.content.Intent
+import android.annotation.SuppressLint
+import android.content.*
 import android.content.pm.PackageInfo
 import android.content.res.Resources
 import android.graphics.BitmapFactory
@@ -36,35 +34,60 @@ import android.util.TypedValue
 import androidx.annotation.AttrRes
 import androidx.preference.Preference
 import com.crashlytics.android.Crashlytics
-import kotlinx.coroutines.*
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.GlobalScope
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.suspendCancellableCoroutine
 import java.net.HttpURLConnection
 import java.net.InetAddress
 import kotlin.coroutines.resume
+import kotlin.coroutines.resumeWithException
+
+fun <T> Iterable<T>.forEachTry(action: (T) -> Unit) {
+    var result: Exception? = null
+    for (element in this) try {
+        action(element)
+    } catch (e: Exception) {
+        if (result == null) result = e else result.addSuppressed(e)
+    }
+    if (result != null) {
+        result.printStackTrace()
+        throw result
+    }
+}
 
 val Throwable.readableMessage get() = localizedMessage ?: javaClass.name
 
-private val parseNumericAddress by lazy {
+private val parseNumericAddress by lazy @SuppressLint("DiscouragedPrivateApi") {
     InetAddress::class.java.getDeclaredMethod("parseNumericAddress", String::class.java).apply {
         isAccessible = true
     }
 }
 /**
- * A slightly more performant variant of InetAddress.parseNumericAddress.
+ * A slightly more performant variant of parseNumericAddress.
  *
- * Bug: https://issuetracker.google.com/issues/123456213
+ * Bug in Android 9.0 and lower: https://issuetracker.google.com/issues/123456213
  */
-fun String.parseNumericAddress(): InetAddress? = Os.inet_pton(OsConstants.AF_INET, this)
-        ?: Os.inet_pton(OsConstants.AF_INET6, this)?.let { parseNumericAddress.invoke(null, this) as InetAddress }
+fun String?.parseNumericAddress(): InetAddress? = Os.inet_pton(OsConstants.AF_INET, this)
+        ?: Os.inet_pton(OsConstants.AF_INET6, this)?.let {
+            if (Build.VERSION.SDK_INT >= 29) it else parseNumericAddress.invoke(null, this) as InetAddress
+        }
 
 fun <K, V> MutableMap<K, V>.computeIfAbsentCompat(key: K, value: () -> V) = if (Build.VERSION.SDK_INT >= 24)
     computeIfAbsent(key) { value() } else this[key] ?: value().also { put(key, it) }
 
-suspend fun <T> HttpURLConnection.useCancellable(block: HttpURLConnection.() -> T) = withContext(Dispatchers.IO) {
-    suspendCancellableCoroutine<T> { cont ->
+suspend fun <T> HttpURLConnection.useCancellable(block: suspend HttpURLConnection.() -> T): T {
+    return suspendCancellableCoroutine { cont ->
         cont.invokeOnCancellation {
-            if (Build.VERSION.SDK_INT >= 26) disconnect() else launch(Dispatchers.IO) { disconnect() }
+            if (Build.VERSION.SDK_INT >= 26) disconnect() else GlobalScope.launch(Dispatchers.IO) { disconnect() }
         }
-        cont.resume(block())
+        GlobalScope.launch(Dispatchers.IO) {
+            try {
+                cont.resume(block())
+            } catch (e: Throwable) {
+                cont.resumeWithException(e)
+            }
+        }
     }
 }
 
@@ -75,6 +98,19 @@ fun parsePort(str: String?, default: Int, min: Int = 1025): Int {
 
 fun broadcastReceiver(callback: (Context, Intent) -> Unit): BroadcastReceiver = object : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) = callback(context, intent)
+}
+
+fun Context.listenForPackageChanges(onetime: Boolean = true, callback: () -> Unit) = object : BroadcastReceiver() {
+    override fun onReceive(context: Context, intent: Intent) {
+        callback()
+        if (onetime) context.unregisterReceiver(this)
+    }
+}.apply {
+    registerReceiver(this, IntentFilter().apply {
+        addAction(Intent.ACTION_PACKAGE_ADDED)
+        addAction(Intent.ACTION_PACKAGE_REMOVED)
+        addDataScheme("package")
+    })
 }
 
 fun ContentResolver.openBitmap(uri: Uri) =

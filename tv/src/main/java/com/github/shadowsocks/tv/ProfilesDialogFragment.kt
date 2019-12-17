@@ -47,7 +47,7 @@ class ProfilesDialogFragment : LeanbackListPreferenceDialogFragmentCompat() {
             if (index == RecyclerView.NO_POSITION) return
             Core.switchProfile(adapter.profiles[index].id)
             (targetFragment as MainPreferenceFragment).startService()
-            fragmentManager?.popBackStack()
+            parentFragmentManager.popBackStack()
             adapter.notifyDataSetChanged()
         }
     }
@@ -77,8 +77,8 @@ class ProfilesDialogFragment : LeanbackListPreferenceDialogFragmentCompat() {
     private val adapter = ProfilesAdapter()
 
     override fun onCreateView(inflater: LayoutInflater, container: ViewGroup?, savedInstanceState: Bundle?): View {
-        return super.onCreateView(inflater, container, savedInstanceState)!!.also {
-            val list = it.findViewById<RecyclerView>(android.R.id.list)
+        return super.onCreateView(inflater, container, savedInstanceState)!!.apply {
+            val list = findViewById<RecyclerView>(android.R.id.list)
             list.adapter = adapter
             list.layoutManager!!.scrollToPosition(adapter.profiles.indexOfFirst { it.id == DataStore.profileId })
         }
