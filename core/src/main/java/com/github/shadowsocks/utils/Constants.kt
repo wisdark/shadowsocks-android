@@ -73,12 +73,14 @@ object Key {
     const val controlImport = "control.import"
     const val controlExport = "control.export"
     const val about = "about"
+    const val aboutOss = "about.ossLicenses"
 }
 
 object Action {
     const val SERVICE = "com.github.shadowsocks.SERVICE"
     const val CLOSE = "com.github.shadowsocks.CLOSE"
     const val RELOAD = "com.github.shadowsocks.RELOAD"
+    const val ABORT = "com.github.shadowsocks.ABORT"
 
     const val EXTRA_PROFILE_ID = "com.github.shadowsocks.EXTRA_PROFILE_ID"
 }

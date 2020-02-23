@@ -38,9 +38,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.io.IOException
-import java.net.HttpURLConnection
-import java.net.URL
-import java.net.UnknownHostException
+import java.net.*
 import java.security.MessageDigest
 
 /**
@@ -49,8 +47,7 @@ import java.security.MessageDigest
 class ProxyInstance(val profile: Profile, private val route: String = profile.route) {
     private var configFile: File? = null
     var trafficMonitor: TrafficMonitor? = null
-    private val plugin = PluginConfiguration(profile.plugin ?: "").selectedOptions
-    val pluginPath by lazy { PluginManager.init(plugin) }
+    val plugin by lazy { PluginManager.init(PluginConfiguration(profile.plugin ?: "")) }
     private var scheduleConfigUpdate = false
 
     suspend fun init(service: BaseService.Interface, hosts: HostsFile) {
@@ -85,21 +82,26 @@ class ProxyInstance(val profile: Profile, private val route: String = profile.ro
             profile.method = proxy[3].trim()
         }
 
-        if (route == Acl.CUSTOM_RULES) try {
-            withContext(Dispatchers.IO) {
-                Acl.save(Acl.CUSTOM_RULES, Acl.customRules.flatten(10, service::openConnection))
-            }
-        } catch (e: IOException) {
-            throw BaseService.ExpectedExceptionWrapper(e)
-        }
-
         // it's hard to resolve DNS on a specific interface so we'll do it here
         if (profile.host.parseNumericAddress() == null) {
-            profile.host = (hosts.resolve(profile.host).firstOrNull() ?: try {
-                service.resolver(profile.host).firstOrNull()
-            } catch (_: IOException) {
-                null
-            })?.hostAddress ?: throw UnknownHostException()
+            profile.host = hosts.resolve(profile.host).run {
+                if (isEmpty()) try {
+                    service.resolver(profile.host).firstOrNull()
+                } catch (_: IOException) {
+                    null
+                } else {
+                    val network = service.getActiveNetwork() ?: throw UnknownHostException()
+                    val hasIpv4 = DnsResolverCompat.haveIpv4(network)
+                    val hasIpv6 = DnsResolverCompat.haveIpv6(network)
+                    firstOrNull {
+                        when (it) {
+                            is Inet4Address -> hasIpv4
+                            is Inet6Address -> hasIpv6
+                            else -> error(it)
+                        }
+                    }
+                }
+            }?.hostAddress ?: throw UnknownHostException()
         }
     }
 
@@ -112,7 +114,7 @@ class ProxyInstance(val profile: Profile, private val route: String = profile.ro
 
         this.configFile = configFile
         val config = profile.toJson()
-        if (pluginPath != null) config.put("plugin", pluginPath).put("plugin_opts", plugin.toString())
+        plugin?.let { (path, opts) -> config.put("plugin", path).put("plugin_opts", opts.toString()) }
         configFile.writeText(config.toString())
 
         val cmd = service.buildAdditionalArguments(arrayListOf(
@@ -130,7 +132,7 @@ class ProxyInstance(val profile: Profile, private val route: String = profile.ro
         }
 
         // for UDP profile, it's only going to operate in UDP relay mode-only so this flag has no effect
-        if (profile.route == Acl.ALL || profile.route == Acl.BYPASS_LAN) cmd += "-D"
+        if (profile.route == Acl.ALL) cmd += "-D"
 
         if (DataStore.tcpFastOpen) cmd += "--fast-open"
 
@@ -139,7 +141,7 @@ class ProxyInstance(val profile: Profile, private val route: String = profile.ro
 
     fun scheduleUpdate() {
         if (route !in arrayOf(Acl.ALL, Acl.CUSTOM_RULES)) AclSyncer.schedule(route)
-        if (scheduleConfigUpdate) RemoteConfig.scheduleFetch()
+        if (scheduleConfigUpdate) RemoteConfig.fetchAsync()
     }
 
     fun shutdown(scope: CoroutineScope) {
