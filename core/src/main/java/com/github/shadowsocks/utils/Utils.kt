@@ -28,24 +28,23 @@ import android.graphics.BitmapFactory
 import android.graphics.ImageDecoder
 import android.net.Uri
 import android.os.Build
-import android.system.ErrnoException
 import android.system.Os
 import android.system.OsConstants
 import android.util.TypedValue
 import androidx.annotation.AttrRes
 import androidx.preference.Preference
-import com.crashlytics.android.Crashlytics
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.GlobalScope
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
+import timber.log.Timber
 import java.io.FileDescriptor
 import java.net.HttpURLConnection
 import java.net.InetAddress
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
 
-fun <T> Iterable<T>.forEachTry(action: (T) -> Unit) {
+inline fun <T> Iterable<T>.forEachTry(action: (T) -> Unit) {
     var result: Exception? = null
     for (element in this) try {
         action(element)
@@ -53,7 +52,7 @@ fun <T> Iterable<T>.forEachTry(action: (T) -> Unit) {
         if (result == null) result = e else result.addSuppressed(e)
     }
     if (result != null) {
-        result.printStackTrace()
+        Timber.d(result)
         throw result
     }
 }
@@ -66,11 +65,7 @@ val Throwable.readableMessage get() = localizedMessage ?: javaClass.name
 private val getInt = FileDescriptor::class.java.getDeclaredMethod("getInt$")
 val FileDescriptor.int get() = getInt.invoke(this) as Int
 
-fun FileDescriptor.closeQuietly() = try {
-    Os.close(this)
-} catch (_: ErrnoException) { }
-
-private val parseNumericAddress by lazy @SuppressLint("DiscouragedPrivateApi") {
+private val parseNumericAddress by lazy @SuppressLint("SoonBlockedPrivateApi") {
     InetAddress::class.java.getDeclaredMethod("parseNumericAddress", String::class.java).apply {
         isAccessible = true
     }
@@ -136,13 +131,6 @@ fun Resources.Theme.resolveResourceId(@AttrRes resId: Int): Int {
     val typedValue = TypedValue()
     if (!resolveAttribute(resId, typedValue, true)) throw Resources.NotFoundException()
     return typedValue.resourceId
-}
-
-val Intent.datas get() = listOfNotNull(data) + (clipData?.asIterable()?.mapNotNull { it.uri } ?: emptyList())
-
-fun printLog(t: Throwable) {
-    Crashlytics.logException(t)
-    t.printStackTrace()
 }
 
 fun Preference.remove() = parent!!.removePreference(this)

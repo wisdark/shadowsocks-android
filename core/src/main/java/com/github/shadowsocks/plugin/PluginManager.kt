@@ -30,23 +30,21 @@ import android.content.pm.ProviderInfo
 import android.content.pm.Signature
 import android.database.Cursor
 import android.net.Uri
+import android.os.Build
 import android.system.Os
 import android.util.Base64
-import android.util.Log
+import android.widget.Toast
 import androidx.core.os.bundleOf
-import com.crashlytics.android.Crashlytics
 import com.github.shadowsocks.Core
 import com.github.shadowsocks.Core.app
 import com.github.shadowsocks.bg.BaseService
 import com.github.shadowsocks.utils.listenForPackageChanges
-import com.github.shadowsocks.utils.printLog
 import com.github.shadowsocks.utils.signaturesCompat
+import timber.log.Timber
 import java.io.File
 import java.io.FileNotFoundException
 
 object PluginManager {
-    private const val TAG = "PluginManager"
-
     class PluginNotFoundException(private val plugin: String) : FileNotFoundException(plugin),
             BaseService.ExpectedException {
         override fun getLocalizedMessage() = app.getString(com.github.shadowsocks.core.R.string.plugin_unknown, plugin)
@@ -130,7 +128,7 @@ object PluginManager {
             val result = initNative(configuration)
             if (result != null) return result
         } catch (t: Throwable) {
-            if (throwable == null) throwable = t else printLog(t)
+            if (throwable == null) throwable = t else Timber.w(t)
         }
 
         // add other plugin types here
@@ -139,19 +137,26 @@ object PluginManager {
     }
 
     private fun initNative(configuration: PluginConfiguration): Pair<String, PluginOptions>? {
+        var flags = PackageManager.GET_META_DATA
+        if (Build.VERSION.SDK_INT >= 24) {
+            flags = flags or PackageManager.MATCH_DIRECT_BOOT_UNAWARE or PackageManager.MATCH_DIRECT_BOOT_AWARE
+        }
         val providers = app.packageManager.queryIntentContentProviders(
-                Intent(PluginContract.ACTION_NATIVE_PLUGIN, buildUri(configuration.selected)),
-                PackageManager.GET_META_DATA or
-                        PackageManager.MATCH_DIRECT_BOOT_UNAWARE or PackageManager.MATCH_DIRECT_BOOT_AWARE
-        )
+                Intent(PluginContract.ACTION_NATIVE_PLUGIN, buildUri(configuration.selected)), flags)
+                .filter { it.providerInfo.exported }
         if (providers.isEmpty()) return null
+        if (providers.size > 1) {
+            val message = "Conflicting plugins found from: ${providers.joinToString { it.providerInfo.packageName }}"
+            Toast.makeText(app, message, Toast.LENGTH_LONG).show()
+            throw IllegalStateException(message)
+        }
         val provider = providers.single().providerInfo
         val options = configuration.getOptions { provider.loadString(PluginContract.METADATA_KEY_DEFAULT_CONFIG) }
         var failure: Throwable? = null
         try {
             initNativeFaster(provider)?.also { return it to options }
         } catch (t: Throwable) {
-            Crashlytics.log(Log.WARN, TAG, "Initializing native plugin faster mode failed")
+            Timber.w("Initializing native plugin faster mode failed")
             failure = t
         }
 
@@ -162,7 +167,7 @@ object PluginManager {
         try {
             return initNativeFast(app.contentResolver, options, uri)?.let { it to options }
         } catch (t: Throwable) {
-            Crashlytics.log(Log.WARN, TAG, "Initializing native plugin fast mode failed")
+            Timber.w("Initializing native plugin fast mode failed")
             failure?.also { t.addSuppressed(it) }
             failure = t
         }

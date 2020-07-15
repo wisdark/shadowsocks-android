@@ -20,15 +20,10 @@
 
 package com.github.shadowsocks
 
-import android.app.Activity
 import android.app.backup.BackupManager
 import android.content.ActivityNotFoundException
-import android.content.Intent
-import android.net.VpnService
 import android.os.Bundle
-import android.os.Handler
 import android.os.RemoteException
-import android.util.Log
 import android.view.*
 import androidx.appcompat.app.AppCompatActivity
 import androidx.browser.customtabs.CustomTabColorSchemeParams
@@ -40,7 +35,6 @@ import androidx.core.view.GravityCompat
 import androidx.core.view.updateLayoutParams
 import androidx.drawerlayout.widget.DrawerLayout
 import androidx.preference.PreferenceDataStore
-import com.crashlytics.android.Crashlytics
 import com.github.shadowsocks.acl.CustomRulesFragment
 import com.github.shadowsocks.aidl.IShadowsocksService
 import com.github.shadowsocks.aidl.ShadowsocksConnection
@@ -51,18 +45,19 @@ import com.github.shadowsocks.preference.OnPreferenceDataStoreChangeListener
 import com.github.shadowsocks.subscription.SubscriptionFragment
 import com.github.shadowsocks.utils.Key
 import com.github.shadowsocks.utils.SingleInstanceActivity
+import com.github.shadowsocks.utils.StartService
 import com.github.shadowsocks.widget.ListHolderListener
 import com.github.shadowsocks.widget.ServiceButton
 import com.github.shadowsocks.widget.StatsBar
 import com.google.android.material.navigation.NavigationView
 import com.google.android.material.snackbar.Snackbar
+import com.google.firebase.analytics.ktx.analytics
+import com.google.firebase.analytics.ktx.logEvent
+import com.google.firebase.ktx.Firebase
 
 class MainActivity : AppCompatActivity(), ShadowsocksConnection.Callback, OnPreferenceDataStoreChangeListener,
         NavigationView.OnNavigationItemSelectedListener {
     companion object {
-        private const val TAG = "ShadowsocksMainActivity"
-        private const val REQUEST_CONNECT = 1
-
         var stateListener: ((BaseService.State) -> Unit)? = null
     }
 
@@ -119,18 +114,9 @@ class MainActivity : AppCompatActivity(), ShadowsocksConnection.Callback, OnPref
         stateListener?.invoke(state)
     }
 
-    private fun toggle() = when {
-        state.canStop -> Core.stopService()
-        DataStore.serviceMode == Key.modeVpn -> {
-            val intent = VpnService.prepare(this)
-            if (intent != null) startActivityForResult(intent, REQUEST_CONNECT)
-            else onActivityResult(REQUEST_CONNECT, Activity.RESULT_OK, null)
-        }
-        else -> Core.startService()
-    }
+    private fun toggle() = if (state.canStop) Core.stopService() else connect.launch(null)
 
-    private val handler = Handler()
-    private val connection = ShadowsocksConnection(handler, true)
+    private val connection = ShadowsocksConnection(true)
     override fun onServiceConnected(service: IShadowsocksService) = changeState(try {
         BaseService.State.values()[service.state]
     } catch (_: RemoteException) {
@@ -142,15 +128,8 @@ class MainActivity : AppCompatActivity(), ShadowsocksConnection.Callback, OnPref
         connection.connect(this, this)
     }
 
-    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
-        when {
-            requestCode != REQUEST_CONNECT -> super.onActivityResult(requestCode, resultCode, data)
-            resultCode == Activity.RESULT_OK -> Core.startService()
-            else -> {
-                snackbar().setText(R.string.vpn_permission_denied).show()
-                Crashlytics.log(Log.ERROR, TAG, "Failed to start VpnService from onActivityResult: $data")
-            }
-        }
+    private val connect = registerForActivityResult(StartService()) {
+        if (it) snackbar().setText(R.string.vpn_permission_denied).show()
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -187,7 +166,7 @@ class MainActivity : AppCompatActivity(), ShadowsocksConnection.Callback, OnPref
 
     override fun onPreferenceDataStoreChanged(store: PreferenceDataStore, key: String) {
         when (key) {
-            Key.serviceMode -> handler.post {
+            Key.serviceMode -> {
                 connection.disconnect(this)
                 connection.connect(this, this)
             }
@@ -208,7 +187,7 @@ class MainActivity : AppCompatActivity(), ShadowsocksConnection.Callback, OnPref
                 }
                 R.id.globalSettings -> displayFragment(GlobalSettingsFragment())
                 R.id.about -> {
-                    Core.analytics.logEvent("about", Bundle())
+                    Firebase.analytics.logEvent("about") { }
                     displayFragment(AboutFragment())
                 }
                 R.id.faq -> {
@@ -266,6 +245,5 @@ class MainActivity : AppCompatActivity(), ShadowsocksConnection.Callback, OnPref
         DataStore.publicStore.unregisterChangeListener(this)
         connection.disconnect(this)
         BackupManager(this).dataChanged()
-        handler.removeCallbacksAndMessages(null)
     }
 }

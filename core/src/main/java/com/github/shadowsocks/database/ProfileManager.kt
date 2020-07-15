@@ -26,11 +26,12 @@ import com.github.shadowsocks.Core
 import com.github.shadowsocks.preference.DataStore
 import com.github.shadowsocks.utils.DirectBoot
 import com.github.shadowsocks.utils.forEachTry
-import com.github.shadowsocks.utils.printLog
 import com.google.gson.JsonStreamParser
 import org.json.JSONArray
+import timber.log.Timber
 import java.io.IOException
 import java.io.InputStream
+import java.io.Serializable
 import java.sql.SQLException
 
 /**
@@ -46,6 +47,14 @@ object ProfileManager {
     }
     var listener: Listener? = null
 
+    data class ExpandedProfile(val main: Profile, val udpFallback: Profile?) : Serializable {
+        companion object {
+            private const val serialVersionUID = 1L
+        }
+
+        fun toList() = listOfNotNull(main, udpFallback)
+    }
+
     @Throws(SQLException::class)
     fun createProfile(profile: Profile = Profile()): Profile {
         profile.id = 0
@@ -59,7 +68,7 @@ object ProfileManager {
         val profiles = if (replace) getAllProfiles()?.associateBy { it.formattedAddress } else null
         val feature = if (replace) {
             profiles?.values?.singleOrNull { it.id == DataStore.profileId }
-        } else Core.currentProfile?.first
+        } else Core.currentProfile?.main
         val lazyClear = lazy { clear() }
         jsons.asIterable().forEachTry { json ->
             Profile.parseJson(JsonStreamParser(json.bufferedReader()).asSequence().single(), feature) {
@@ -94,12 +103,12 @@ object ProfileManager {
     } catch (ex: SQLiteCantOpenDatabaseException) {
         throw IOException(ex)
     } catch (ex: SQLException) {
-        printLog(ex)
+        Timber.w(ex)
         null
     }
 
     @Throws(IOException::class)
-    fun expand(profile: Profile): Pair<Profile, Profile?> = Pair(profile, profile.udpFallback?.let { getProfile(it) })
+    fun expand(profile: Profile) = ExpandedProfile(profile, profile.udpFallback?.let { getProfile(it) })
 
     @Throws(SQLException::class)
     fun delProfile(id: Long) {
@@ -122,7 +131,7 @@ object ProfileManager {
         } catch (ex: SQLiteCantOpenDatabaseException) {
             throw IOException(ex)
         } catch (ex: SQLException) {
-            printLog(ex)
+            Timber.w(ex)
             false
         }
         if (!nonEmpty) DataStore.profileId = createProfile().id
@@ -134,7 +143,7 @@ object ProfileManager {
     } catch (ex: SQLiteCantOpenDatabaseException) {
         throw IOException(ex)
     } catch (ex: SQLException) {
-        printLog(ex)
+        Timber.w(ex)
         null
     }
 
@@ -144,7 +153,7 @@ object ProfileManager {
     } catch (ex: SQLiteCantOpenDatabaseException) {
         throw IOException(ex)
     } catch (ex: SQLException) {
-        printLog(ex)
+        Timber.w(ex)
         null
     }
 }

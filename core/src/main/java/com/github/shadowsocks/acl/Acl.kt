@@ -21,18 +21,16 @@
 package com.github.shadowsocks.acl
 
 import android.content.Context
-import android.util.Log
 import androidx.recyclerview.widget.SortedList
-import com.crashlytics.android.Crashlytics
 import com.github.shadowsocks.Core
 import com.github.shadowsocks.net.Subnet
-import com.github.shadowsocks.preference.DataStore
 import com.github.shadowsocks.utils.BaseSorter
 import com.github.shadowsocks.utils.URLSorter
 import com.github.shadowsocks.utils.asIterable
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.runBlocking
+import timber.log.Timber
 import java.io.File
 import java.io.IOException
 import java.io.Reader
@@ -42,7 +40,6 @@ import kotlin.coroutines.coroutineContext
 
 class Acl {
     companion object {
-        const val TAG = "Acl"
         const val ALL = "all"
         const val BYPASS_LAN = "bypass-lan"
         const val BYPASS_CHN = "bypass-china"
@@ -50,25 +47,24 @@ class Acl {
         const val GFWLIST = "gfwlist"
         const val CHINALIST = "china-list"
         const val CUSTOM_RULES = "custom-rules"
+        const val CUSTOM_RULES_USER = "custom-rules-user"
 
-        val networkAclParser = "^IMPORT_URL\\s*<(.+)>\\s*$".toRegex()
+        private val networkAclParser = "^IMPORT_URL\\s*<(.+)>\\s*$".toRegex()
 
         fun getFile(id: String, context: Context = Core.deviceStorage) = File(context.noBackupFilesDir, "$id.acl")
 
         var customRules: Acl
             get() {
                 val acl = Acl()
-                val str = DataStore.publicStore.getString(CUSTOM_RULES)
-                if (str != null) acl.fromReader(str.reader(), true)
+                val file = getFile(CUSTOM_RULES_USER)
+                if (file.canRead()) acl.fromReader(file.reader(), true)
                 if (!acl.bypass) {
                     acl.bypass = true
                     acl.subnets.clear()
                 }
                 return acl
             }
-            set(value) = DataStore.publicStore.putString(CUSTOM_RULES,
-                    if ((!value.bypass || value.subnets.size() == 0) && value.bypassHostnames.size() == 0 &&
-                            value.proxyHostnames.size() == 0 && value.urls.size() == 0) null else value.toString())
+            set(value) = getFile(CUSTOM_RULES_USER).writeText(value.toString())
         fun save(id: String, acl: Acl) = getFile(id).writeText(acl.toString())
 
         suspend fun <T> parse(reader: Reader, bypassHostnames: (String) -> T, proxyHostnames: (String) -> T,
@@ -159,7 +155,7 @@ class Acl {
             val child = Acl().fromReader(connect(url).getInputStream().bufferedReader(), bypass)
             child.flatten(depth - 1, connect)
             if (bypass != child.bypass) {
-                Crashlytics.log(Log.WARN, TAG, "Imported network ACL has a conflicting mode set. " +
+                Timber.w("Imported network ACL has a conflicting mode set. " +
                         "This will probably not work as intended. URL: $url")
                 child.subnets.clear() // subnets for the different mode are discarded
                 child.bypass = bypass

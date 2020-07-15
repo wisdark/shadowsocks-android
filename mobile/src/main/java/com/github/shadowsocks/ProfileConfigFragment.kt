@@ -30,6 +30,9 @@ import android.os.Bundle
 import android.os.Parcelable
 import android.view.MenuItem
 import android.view.View
+import androidx.activity.result.component1
+import androidx.activity.result.component2
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AlertDialog
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.whenCreated
@@ -50,7 +53,6 @@ class ProfileConfigFragment : PreferenceFragmentCompat(),
     companion object PasswordSummaryProvider : Preference.SummaryProvider<EditTextPreference> {
         override fun provideSummary(preference: EditTextPreference?) = "\u2022".repeat(preference?.text?.length ?: 0)
 
-        private const val REQUEST_CODE_PLUGIN_CONFIGURE = 1
         const val REQUEST_UNSAVED_CHANGES = 2
         private const val REQUEST_PICK_PLUGIN = 3
     }
@@ -88,7 +90,6 @@ class ProfileConfigFragment : PreferenceFragmentCompat(),
         findPreference<EditTextPreference>(Key.remotePort)!!.setOnBindEditTextListener(EditTextPreferenceModifiers.Port)
         findPreference<EditTextPreference>(Key.password)!!.summaryProvider = PasswordSummaryProvider
         val serviceMode = DataStore.serviceMode
-        findPreference<Preference>(Key.remoteDns)!!.isEnabled = serviceMode != Key.modeProxy
         findPreference<Preference>(Key.ipv6)!!.isEnabled = serviceMode == Key.modeVpn
         isProxyApps = findPreference(Key.proxyApps)!!
         isProxyApps.isEnabled = serviceMode == Key.modeVpn
@@ -100,7 +101,6 @@ class ProfileConfigFragment : PreferenceFragmentCompat(),
         findPreference<Preference>(Key.metered)!!.apply {
             if (Build.VERSION.SDK_INT >= 28) isEnabled = serviceMode == Key.modeVpn else remove()
         }
-        findPreference<Preference>(Key.udpdns)!!.isEnabled = serviceMode != Key.modeProxy
         plugin = findPreference(Key.plugin)!!
         pluginConfigure = findPreference(Key.pluginConfigure)!!
         pluginConfigure.setOnBindEditTextListener(EditTextPreferenceModifiers.Monospace)
@@ -177,7 +177,7 @@ class ProfileConfigFragment : PreferenceFragmentCompat(),
         DataStore.dirty = true
         true
     } catch (exc: RuntimeException) {
-        Snackbar.make(view!!, exc.readableMessage, Snackbar.LENGTH_LONG).show()
+        Snackbar.make(requireView(), exc.readableMessage, Snackbar.LENGTH_LONG).show()
         false
     }
 
@@ -194,12 +194,23 @@ class ProfileConfigFragment : PreferenceFragmentCompat(),
             Key.pluginConfigure -> {
                 val intent = PluginManager.buildIntent(plugin.selectedEntry!!.id, PluginContract.ACTION_CONFIGURE)
                 if (intent.resolveActivity(requireContext().packageManager) == null) showPluginEditor() else {
-                    startActivityForResult(intent
-                            .putExtra(PluginContract.EXTRA_OPTIONS, pluginConfiguration.getOptions().toString()),
-                            REQUEST_CODE_PLUGIN_CONFIGURE)
+                    configurePlugin.launch(intent
+                            .putExtra(PluginContract.EXTRA_OPTIONS, pluginConfiguration.getOptions().toString()))
                 }
             }
             else -> super.onDisplayPreferenceDialog(preference)
+        }
+    }
+
+    private val configurePlugin = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) {
+        (resultCode, data) ->
+        when (resultCode) {
+            Activity.RESULT_OK -> {
+                val options = data?.getStringExtra(PluginContract.EXTRA_OPTIONS)
+                pluginConfigure.text = options
+                onPreferenceChange(null, options)
+            }
+            PluginContract.RESULT_FALLBACK -> showPluginEditor()
         }
     }
 
@@ -217,15 +228,9 @@ class ProfileConfigFragment : PreferenceFragmentCompat(),
                 plugin.value = pluginConfiguration.selected
                 pluginConfigure.isEnabled = selected !is NoPlugin
                 pluginConfigure.text = pluginConfiguration.getOptions().toString()
-                if (!selected.trusted) Snackbar.make(view!!, R.string.plugin_untrusted, Snackbar.LENGTH_LONG).show()
-            }
-            REQUEST_CODE_PLUGIN_CONFIGURE -> when (resultCode) {
-                Activity.RESULT_OK -> {
-                    val options = data?.getStringExtra(PluginContract.EXTRA_OPTIONS)
-                    pluginConfigure.text = options
-                    onPreferenceChange(null, options)
+                if (!selected.trusted) {
+                    Snackbar.make(requireView(), R.string.plugin_untrusted, Snackbar.LENGTH_LONG).show()
                 }
-                PluginContract.RESULT_FALLBACK -> showPluginEditor()
             }
             REQUEST_UNSAVED_CHANGES -> when (resultCode) {
                 DialogInterface.BUTTON_POSITIVE -> saveAndExit()

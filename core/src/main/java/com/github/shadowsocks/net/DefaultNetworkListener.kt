@@ -27,12 +27,12 @@ import android.net.NetworkCapabilities
 import android.net.NetworkRequest
 import android.os.Build
 import com.github.shadowsocks.Core
-import com.github.shadowsocks.utils.printLog
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.GlobalScope
 import kotlinx.coroutines.channels.actor
 import kotlinx.coroutines.runBlocking
+import timber.log.Timber
 import java.net.UnknownHostException
 
 object DefaultNetworkListener {
@@ -93,7 +93,7 @@ object DefaultNetworkListener {
     // NB: this runs in ConnectivityThread, and this behavior cannot be changed until API 26
     private object Callback : ConnectivityManager.NetworkCallback() {
         override fun onAvailable(network: Network) = runBlocking { networkActor.send(NetworkMessage.Put(network)) }
-        override fun onCapabilitiesChanged(network: Network, networkCapabilities: NetworkCapabilities?) {
+        override fun onCapabilitiesChanged(network: Network, networkCapabilities: NetworkCapabilities) {
             // it's a good idea to refresh capabilities
             runBlocking { networkActor.send(NetworkMessage.Update(network)) }
         }
@@ -104,6 +104,10 @@ object DefaultNetworkListener {
     private val request = NetworkRequest.Builder().apply {
         addCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
         addCapability(NetworkCapabilities.NET_CAPABILITY_NOT_RESTRICTED)
+        if (Build.VERSION.SDK_INT == 23) {  // workarounds for OEM bugs
+            removeCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)
+            removeCapability(NetworkCapabilities.NET_CAPABILITY_CAPTIVE_PORTAL)
+        }
     }.build()
     /**
      * Unfortunately registerDefaultNetworkCallback is going to return VPN interface since Android P DP1:
@@ -124,7 +128,7 @@ object DefaultNetworkListener {
             Core.connectivity.requestNetwork(request, Callback)
         } catch (e: SecurityException) {
             // known bug: https://stackoverflow.com/a/33509180/2245107
-            if (Build.VERSION.SDK_INT != 23) printLog(e)
+            if (Build.VERSION.SDK_INT != 23) Timber.w(e)
             fallback = true
         }
     }

@@ -21,13 +21,11 @@
 package com.github.shadowsocks
 
 import android.annotation.SuppressLint
-import android.app.Activity
 import android.content.ActivityNotFoundException
-import android.content.ClipData
-import android.content.ClipboardManager
 import android.content.Intent
 import android.graphics.Bitmap
 import android.graphics.Color
+import android.net.Uri
 import android.os.Bundle
 import android.text.format.Formatter
 import android.util.LongSparseArray
@@ -36,15 +34,14 @@ import android.view.MenuItem
 import android.view.View
 import android.view.ViewGroup
 import android.widget.*
+import androidx.activity.result.ActivityResultLauncher
 import androidx.appcompat.widget.PopupMenu
 import androidx.appcompat.widget.Toolbar
 import androidx.appcompat.widget.TooltipCompat
-import androidx.core.content.getSystemService
 import androidx.core.os.bundleOf
 import androidx.fragment.app.DialogFragment
 import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.*
-import com.crashlytics.android.Crashlytics
 import com.github.shadowsocks.aidl.TrafficStats
 import com.github.shadowsocks.bg.BaseService
 import com.github.shadowsocks.database.Profile
@@ -53,14 +50,12 @@ import com.github.shadowsocks.plugin.PluginConfiguration
 import com.github.shadowsocks.plugin.showAllowingStateLoss
 import com.github.shadowsocks.preference.DataStore
 import com.github.shadowsocks.utils.Action
-import com.github.shadowsocks.utils.datas
-import com.github.shadowsocks.utils.printLog
+import com.github.shadowsocks.utils.OpenJson
+import com.github.shadowsocks.utils.SaveJson
 import com.github.shadowsocks.utils.readableMessage
 import com.github.shadowsocks.widget.ListHolderListener
 import com.github.shadowsocks.widget.MainListListener
 import com.github.shadowsocks.widget.UndoSnackbarManager
-import com.google.android.gms.ads.AdLoader
-import com.google.android.gms.ads.AdRequest
 import com.google.android.gms.ads.VideoOptions
 import com.google.android.gms.ads.formats.NativeAdOptions
 import com.google.android.gms.ads.formats.UnifiedNativeAd
@@ -71,6 +66,7 @@ import com.google.zxing.MultiFormatWriter
 import com.google.zxing.WriterException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import timber.log.Timber
 import java.nio.charset.StandardCharsets
 
 class ProfilesFragment : ToolbarFragment(), Toolbar.OnMenuItemClickListener {
@@ -81,9 +77,6 @@ class ProfilesFragment : ToolbarFragment(), Toolbar.OnMenuItemClickListener {
         var instance: ProfilesFragment? = null
 
         private const val KEY_URL = "com.github.shadowsocks.QRCodeDialog.KEY_URL"
-        private const val REQUEST_IMPORT_PROFILES = 1
-        private const val REQUEST_REPLACE_PROFILES = 3
-        private const val REQUEST_EXPORT_PROFILES = 2
 
         private val iso88591 = StandardCharsets.ISO_8859_1.newEncoder()
     }
@@ -148,7 +141,7 @@ class ProfilesFragment : ToolbarFragment(), Toolbar.OnMenuItemClickListener {
                 })
             }
         } catch (e: WriterException) {
-            Crashlytics.logException(e)
+            Timber.w(e)
             (activity as MainActivity).snackbar().setText(e.readableMessage).show()
             dismiss()
             null
@@ -172,7 +165,7 @@ class ProfilesFragment : ToolbarFragment(), Toolbar.OnMenuItemClickListener {
                 startConfig(item)
             }
             subscription.setOnClickListener {
-                item = ProfileManager.getProfile(item.id)!!
+                item = ProfileManager.getProfile(item.id) ?: return@setOnClickListener
                 startConfig(item)
             }
             TooltipCompat.setTooltipText(edit, edit.contentDescription)
@@ -249,7 +242,7 @@ class ProfilesFragment : ToolbarFragment(), Toolbar.OnMenuItemClickListener {
             if (adHost != null || !item.isSponsored) return
             if (nativeAdView == null) {
                 nativeAdView = layoutInflater.inflate(R.layout.ad_unified, adContainer, false) as UnifiedNativeAdView
-                AdLoader.Builder(context, "ca-app-pub-3283768469187309/8632513739").apply {
+                AdsManager.load(context) {
                     forUnifiedNativeAd { unifiedNativeAd ->
                         // You must call destroy on old ads when you are done with them,
                         // otherwise you will have a memory leak.
@@ -262,12 +255,7 @@ class ProfilesFragment : ToolbarFragment(), Toolbar.OnMenuItemClickListener {
                             setStartMuted(true)
                         }.build())
                     }.build())
-                }.build().loadAd(AdRequest.Builder().apply {
-                    addTestDevice("B08FC1764A7B250E91EA9D0D5EBEB208")
-                    addTestDevice("7509D18EB8AF82F915874FEF53877A64")
-                    addTestDevice("F58907F28184A828DD0DB6F8E38189C6")
-                    addTestDevice("FE983F496D7C5C1878AA163D9420CA97")
-                }.build())
+                }
             } else if (nativeAd != null) populateUnifiedNativeAdView(nativeAd!!, nativeAdView!!)
         }
 
@@ -336,7 +324,8 @@ class ProfilesFragment : ToolbarFragment(), Toolbar.OnMenuItemClickListener {
                 true
             }
             R.id.action_export_clipboard -> {
-                clipboard.setPrimaryClip(ClipData.newPlainText(null, this.item.toString()))
+                (activity as MainActivity).snackbar().setText(if (Core.trySetPrimaryClip(this.item.toString()))
+                    R.string.action_export_msg else R.string.action_export_err).show()
                 true
             }
             else -> false
@@ -447,8 +436,6 @@ class ProfilesFragment : ToolbarFragment(), Toolbar.OnMenuItemClickListener {
     private lateinit var undoManager: UndoSnackbarManager<Profile>
     private val statsCache = LongSparseArray<TrafficStats>()
 
-    private val clipboard by lazy { requireContext().getSystemService<ClipboardManager>()!! }
-
     private fun startConfig(profile: Profile) {
         profile.serialize()
         startActivity(Intent(context, ProfileConfigActivity::class.java).putExtra(Action.EXTRA_PROFILE_ID, profile.id))
@@ -513,8 +500,8 @@ class ProfilesFragment : ToolbarFragment(), Toolbar.OnMenuItemClickListener {
             R.id.action_import_clipboard -> {
                 try {
                     val profiles = Profile.findAllUrls(
-                            clipboard.primaryClip!!.getItemAt(0).text,
-                            Core.currentProfile?.first
+                            Core.clipboard.primaryClip!!.getItemAt(0).text,
+                            Core.currentProfile?.main
                     ).toList()
                     if (profiles.isNotEmpty()) {
                         profiles.forEach { ProfileManager.createProfile(it) }
@@ -522,96 +509,72 @@ class ProfilesFragment : ToolbarFragment(), Toolbar.OnMenuItemClickListener {
                         return true
                     }
                 } catch (exc: Exception) {
-                    exc.printStackTrace()
+                    Timber.d(exc)
                 }
                 (activity as MainActivity).snackbar().setText(R.string.action_import_err).show()
                 true
             }
             R.id.action_import_file -> {
-                startFilesForResult(Intent(Intent.ACTION_GET_CONTENT).apply {
-                    type = "application/*"
-                    putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true)
-                    putExtra(Intent.EXTRA_MIME_TYPES, arrayOf("application/*", "text/*"))
-                }, REQUEST_IMPORT_PROFILES)
+                startFilesForResult(importProfiles)
                 true
             }
             R.id.action_replace_file -> {
-                startFilesForResult(Intent(Intent.ACTION_GET_CONTENT).apply {
-                    type = "application/*"
-                    putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true)
-                    putExtra(Intent.EXTRA_MIME_TYPES, arrayOf("application/*", "text/*"))
-                }, REQUEST_REPLACE_PROFILES)
+                startFilesForResult(replaceProfiles)
                 true
             }
             R.id.action_manual_settings -> {
                 startConfig(ProfileManager.createProfile(
-                        Profile().also { Core.currentProfile?.first?.copyFeatureSettingsTo(it) }))
+                        Profile().also { Core.currentProfile?.main?.copyFeatureSettingsTo(it) }))
                 true
             }
             R.id.action_export_clipboard -> {
                 val profiles = ProfileManager.getActiveProfiles()
-                (activity as MainActivity).snackbar().setText(if (profiles != null) {
-                    clipboard.setPrimaryClip(ClipData.newPlainText(null, profiles.joinToString("\n")))
-                    R.string.action_export_msg
-                } else R.string.action_export_err).show()
+                val success = profiles != null && Core.trySetPrimaryClip(profiles.joinToString("\n"))
+                (activity as MainActivity).snackbar().setText(if (success)
+                    R.string.action_export_msg else R.string.action_export_err).show()
                 true
             }
             R.id.action_export_file -> {
-                startFilesForResult(Intent(Intent.ACTION_CREATE_DOCUMENT).apply {
-                    type = "application/json"
-                    putExtra(Intent.EXTRA_TITLE, "profiles.json")   // optional title that can be edited
-                }, REQUEST_EXPORT_PROFILES)
+                startFilesForResult(exportProfiles)
                 true
             }
             else -> false
         }
     }
 
-    private fun startFilesForResult(intent: Intent, requestCode: Int) {
+    private fun startFilesForResult(launcher: ActivityResultLauncher<String>) {
         try {
-            startActivityForResult(intent.addCategory(Intent.CATEGORY_OPENABLE), requestCode)
-            return
+            return launcher.launch("")
         } catch (_: ActivityNotFoundException) {
         } catch (_: SecurityException) {
         }
         (activity as MainActivity).snackbar(getString(R.string.file_manager_missing)).show()
     }
 
-    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
-        if (resultCode != Activity.RESULT_OK) super.onActivityResult(requestCode, resultCode, data)
-        else when (requestCode) {
-            REQUEST_IMPORT_PROFILES -> {
-                val activity = activity as MainActivity
-                try {
-                    ProfileManager.createProfilesFromJson(data!!.datas.asSequence().map {
-                        activity.contentResolver.openInputStream(it)
-                    }.filterNotNull())
-                } catch (e: Exception) {
-                    activity.snackbar(e.readableMessage).show()
+    private fun importOrReplaceProfiles(dataUris: List<Uri>, replace: Boolean = false) {
+        if (dataUris.isEmpty()) return
+        val activity = activity as MainActivity
+        try {
+            ProfileManager.createProfilesFromJson(dataUris.asSequence().map {
+                activity.contentResolver.openInputStream(it)
+            }.filterNotNull(), replace)
+        } catch (e: Exception) {
+            activity.snackbar(e.readableMessage).show()
+        }
+    }
+    private val importProfiles = registerForActivityResult(OpenJson()) { importOrReplaceProfiles(it) }
+    private val replaceProfiles = registerForActivityResult(OpenJson()) { importOrReplaceProfiles(it, true) }
+    private val exportProfiles = registerForActivityResult(SaveJson()) { data ->
+        if (data != null) ProfileManager.serializeToJson()?.let { profiles ->
+            val activity = activity as MainActivity
+            try {
+                activity.contentResolver.openOutputStream(data)!!.bufferedWriter().use {
+                    it.write(profiles.toString(2))
                 }
+            } catch (e: Exception) {
+                Timber.w(e)
+                activity.snackbar(e.readableMessage).show()
             }
-            REQUEST_REPLACE_PROFILES -> {
-                val activity = activity as MainActivity
-                try {
-                    ProfileManager.createProfilesFromJson(data!!.datas.asSequence().map {
-                        activity.contentResolver.openInputStream(it)
-                    }.filterNotNull(), true)
-                } catch (e: Exception) {
-                    activity.snackbar(e.readableMessage).show()
-                }
-            }
-            REQUEST_EXPORT_PROFILES -> {
-                val profiles = ProfileManager.serializeToJson()
-                if (profiles != null) try {
-                    requireContext().contentResolver.openOutputStream(data?.data!!)!!.bufferedWriter().use {
-                        it.write(profiles.toString(2))
-                    }
-                } catch (e: Exception) {
-                    printLog(e)
-                    (activity as MainActivity).snackbar(e.readableMessage).show()
-                }
-            }
-            else -> super.onActivityResult(requestCode, resultCode, data)
         }
     }
 

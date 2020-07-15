@@ -24,18 +24,14 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.app.Service
-import android.content.BroadcastReceiver
-import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.os.IBinder
-import android.util.Log
 import android.widget.Toast
 import androidx.annotation.RequiresApi
 import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.MutableLiveData
-import com.crashlytics.android.Crashlytics
 import com.github.shadowsocks.Core
 import com.github.shadowsocks.Core.app
 import com.github.shadowsocks.core.R
@@ -45,6 +41,7 @@ import com.github.shadowsocks.preference.DataStore
 import com.github.shadowsocks.utils.*
 import com.google.gson.JsonStreamParser
 import kotlinx.coroutines.*
+import timber.log.Timber
 import java.io.File
 import java.io.IOException
 import java.io.InputStream
@@ -56,13 +53,13 @@ class SubscriptionService : Service(), CoroutineScope {
         private const val NOTIFICATION_CHANNEL = "service-subscription"
         private const val NOTIFICATION_ID = 2
 
-        val idle = MutableLiveData<Boolean>(true)
+        val idle = MutableLiveData(true)
 
         val notificationChannel @RequiresApi(26) get() = NotificationChannel(NOTIFICATION_CHANNEL,
                 app.getText(R.string.service_subscription), NotificationManager.IMPORTANCE_LOW)
     }
 
-    override val coroutineContext = SupervisorJob() + CoroutineExceptionHandler { _, t -> printLog(t) }
+    override val coroutineContext = SupervisorJob() + CoroutineExceptionHandler { _, t -> Timber.w(t) }
     private var worker: Job? = null
     private val cancelReceiver = broadcastReceiver { _, _ -> worker?.cancel() }
     private var counter = 0
@@ -98,9 +95,7 @@ class SubscriptionService : Service(), CoroutineScope {
                 }
                 Core.notification.notify(NOTIFICATION_ID, notification.build())
                 counter = 0
-                val workers = urls.asIterable().map { url ->
-                    async(Dispatchers.IO) { fetchJson(url, urls.size(), notification) }
-                }
+                val workers = urls.asIterable().map { url -> fetchJsonAsync(url, urls.size(), notification) }
                 try {
                     val localJsons = workers.awaitAll()
                     withContext(Dispatchers.Main) {
@@ -130,20 +125,20 @@ class SubscriptionService : Service(), CoroutineScope {
         return START_NOT_STICKY
     }
 
-    private suspend fun fetchJson(url: URL, max: Int, notification: NotificationCompat.Builder): File? {
+    private fun fetchJsonAsync(url: URL, max: Int, notification: NotificationCompat.Builder) = async(Dispatchers.IO) {
         val tempFile = File.createTempFile("subscription-", ".json", cacheDir)
         try {
             (url.openConnection() as HttpURLConnection).useCancellable {
                 tempFile.outputStream().use { out -> inputStream.copyTo(out) }
             }
-            return tempFile
+            tempFile
         } catch (e: IOException) {
-            e.printStackTrace()
+            Timber.d(e)
             launch(Dispatchers.Main) {
                 Toast.makeText(this@SubscriptionService, e.readableMessage, Toast.LENGTH_LONG).show()
             }
             if (!tempFile.delete()) tempFile.deleteOnExit()
-            return null
+            null
         } finally {
             withContext(Dispatchers.Main) {
                 counter += 1
@@ -178,11 +173,12 @@ class SubscriptionService : Service(), CoroutineScope {
                 subscriptions.compute(it.name to it.formattedAddress) { _, oldProfile ->
                     when (oldProfile?.subscription) {
                         Profile.SubscriptionStatus.Active -> {
-                            Log.w("SubscriptionService", "Duplicate profiles detected. Please use different profile " +
-                                    "names and/or address:port for better subscription support.")
+                            Timber.w("Duplicate profiles detected. Please use different profile names and/or " +
+                                    "address:port for better subscription support.")
                             oldProfile
                         }
                         Profile.SubscriptionStatus.Obsolete -> {
+                            toUpdate.add(oldProfile.id)
                             oldProfile.password = it.password
                             oldProfile.method = it.method
                             oldProfile.plugin = it.plugin
@@ -197,7 +193,7 @@ class SubscriptionService : Service(), CoroutineScope {
                 }!!
             }
         } catch (e: Exception) {
-            e.printStackTrace()
+            Timber.d(e)
             Toast.makeText(this, e.readableMessage, Toast.LENGTH_LONG).show()
         }
 

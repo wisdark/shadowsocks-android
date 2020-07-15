@@ -1,7 +1,7 @@
 /*******************************************************************************
  *                                                                             *
- *  Copyright (C) 2019 by Max Lv <max.c.lv@gmail.com>                          *
- *  Copyright (C) 2019 by Mygod Studio <contact-shadowsocks-android@mygod.be>  *
+ *  Copyright (C) 2020 by Max Lv <max.c.lv@gmail.com>                          *
+ *  Copyright (C) 2020 by Mygod Studio <contact-shadowsocks-android@mygod.be>  *
  *                                                                             *
  *  This program is free software: you can redistribute it and/or modify       *
  *  it under the terms of the GNU General Public License as published by       *
@@ -18,33 +18,24 @@
  *                                                                             *
  *******************************************************************************/
 
-package com.github.shadowsocks.preference
+package com.github.shadowsocks
 
-import android.content.ActivityNotFoundException
-import android.content.Intent
-import androidx.appcompat.app.AlertDialog
-import androidx.core.os.bundleOf
-import androidx.preference.EditTextPreferenceDialogFragmentCompat
-import com.github.shadowsocks.MainActivity
-import com.github.shadowsocks.R
+import android.content.Context
+import com.google.android.gms.ads.AdLoader
+import com.google.android.gms.ads.AdRequest
+import com.google.android.gms.ads.MobileAds
+import com.google.android.gms.ads.RequestConfiguration
 
-class BrowsableEditTextPreferenceDialogFragment : EditTextPreferenceDialogFragmentCompat() {
-    fun setKey(key: String) {
-        arguments = bundleOf(Pair(ARG_KEY, key))
+internal object AdsManager {
+    init {
+        MobileAds.setRequestConfiguration(RequestConfiguration.Builder().apply {
+            setTestDeviceIds(listOf(
+                    "B08FC1764A7B250E91EA9D0D5EBEB208", "7509D18EB8AF82F915874FEF53877A64",
+                    "F58907F28184A828DD0DB6F8E38189C6", "FE983F496D7C5C1878AA163D9420CA97"))
+        }.build())
     }
 
-    override fun onPrepareDialogBuilder(builder: AlertDialog.Builder) {
-        super.onPrepareDialogBuilder(builder)
-        builder.setNeutralButton(R.string.browse) { _, _ ->
-            val activity = activity as MainActivity
-            try {
-                targetFragment!!.startActivityForResult(Intent(Intent.ACTION_GET_CONTENT).apply {
-                    addCategory(Intent.CATEGORY_OPENABLE)
-                    type = "*/*"
-                }, targetRequestCode)
-                return@setNeutralButton
-            } catch (_: ActivityNotFoundException) { } catch (_: SecurityException) { }
-            activity.snackbar(activity.getString(R.string.file_manager_missing)).show()
-        }
-    }
+    fun load(context: Context?, setup: AdLoader.Builder.() -> Unit) =
+            AdLoader.Builder(context, "ca-app-pub-3283768469187309/8632513739").apply(setup).build()
+                    .loadAd(AdRequest.Builder().build())
 }
