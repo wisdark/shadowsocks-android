@@ -11,7 +11,7 @@ import org.gradle.kotlin.dsl.getByName
 import org.jetbrains.kotlin.gradle.dsl.KotlinJvmOptions
 import java.util.*
 
-const val lifecycleVersion = "2.3.0-alpha05"
+const val lifecycleVersion = "2.3.0-alpha06"
 
 private val Project.android get() = extensions.getByName<BaseExtension>("android")
 
@@ -26,7 +26,7 @@ fun Project.setupCommon() {
     android.apply {
         compileSdkVersion(30)
         defaultConfig {
-            minSdkVersion(21)
+            minSdkVersion(23)
             targetSdkVersion(30)
             testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         }
