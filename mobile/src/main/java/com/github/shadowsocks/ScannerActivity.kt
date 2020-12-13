@@ -58,6 +58,7 @@ class ScannerActivity : AppCompatActivity(), ImageAnalysis.Analyzer {
     private val imageAnalysis by lazy {
         ImageAnalysis.Builder().apply {
             setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
+            setBackgroundExecutor(Dispatchers.Default.asExecutor())
         }.build().also { it.setAnalyzer(Dispatchers.Main.immediate.asExecutor(), this) }
     }
 
@@ -97,7 +98,7 @@ class ScannerActivity : AppCompatActivity(), ImageAnalysis.Analyzer {
                 CameraSelector.DEFAULT_BACK_CAMERA
             } else CameraSelector.DEFAULT_FRONT_CAMERA
             val preview = Preview.Builder().build()
-            preview.setSurfaceProvider(findViewById<PreviewView>(R.id.barcode).createSurfaceProvider())
+            preview.setSurfaceProvider(findViewById<PreviewView>(R.id.barcode).surfaceProvider)
             try {
                 cameraProvider.bindToLifecycle(this@ScannerActivity, selector, preview, imageAnalysis)
             } catch (e: IllegalArgumentException) {

@@ -39,6 +39,7 @@ import android.widget.SearchView
 import androidx.annotation.UiThread
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.util.set
+import androidx.core.view.ViewCompat
 import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.DefaultItemAnimator
 import androidx.recyclerview.widget.LinearLayoutManager
@@ -47,7 +48,6 @@ import com.github.shadowsocks.Core.app
 import com.github.shadowsocks.database.ProfileManager
 import com.github.shadowsocks.preference.DataStore
 import com.github.shadowsocks.utils.DirectBoot
-import com.github.shadowsocks.utils.SingleInstanceActivity
 import com.github.shadowsocks.utils.listenForPackageChanges
 import com.github.shadowsocks.widget.ListHolderListener
 import com.github.shadowsocks.widget.ListListener
@@ -217,7 +217,6 @@ class AppManager : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        SingleInstanceActivity.register(this) ?: return
         setContentView(R.layout.layout_apps)
         ListHolderListener.setup(this)
         setSupportActionBar(toolbar)
@@ -242,7 +241,7 @@ class AppManager : AppCompatActivity() {
         }
 
         initProxiedUids()
-        list.setOnApplyWindowInsetsListener(ListListener)
+        ViewCompat.setOnApplyWindowInsetsListener(list, ListListener)
         list.layoutManager = LinearLayoutManager(this, RecyclerView.VERTICAL, false)
         list.itemAnimator = DefaultItemAnimator()
         list.adapter = appsAdapter
@@ -278,8 +277,10 @@ class AppManager : AppCompatActivity() {
                 return true
             }
             R.id.action_export_clipboard -> {
-                Snackbar.make(list, if (Core.trySetPrimaryClip("${DataStore.bypass}\n${DataStore.individual}"))
-                    R.string.action_export_msg else R.string.action_export_err, Snackbar.LENGTH_LONG).show()
+                val success = Core.trySetPrimaryClip("${DataStore.bypass}\n${DataStore.individual}")
+                Snackbar.make(list,
+                        if (success) R.string.action_export_msg else R.string.action_export_err,
+                        Snackbar.LENGTH_LONG).show()
                 return true
             }
             R.id.action_import_clipboard -> {
@@ -287,8 +288,9 @@ class AppManager : AppCompatActivity() {
                 if (!proxiedAppString.isNullOrEmpty()) {
                     val i = proxiedAppString.indexOf('\n')
                     try {
-                        val (enabled, apps) = if (i < 0) Pair(proxiedAppString, "") else
-                            Pair(proxiedAppString.substring(0, i), proxiedAppString.substring(i + 1))
+                        val (enabled, apps) = if (i < 0) {
+                            proxiedAppString to ""
+                        } else proxiedAppString.substring(0, i) to proxiedAppString.substring(i + 1)
                         bypassGroup.check(if (enabled.toBoolean()) R.id.btn_bypass else R.id.btn_on)
                         DataStore.individual = apps
                         DataStore.dirty = true
@@ -307,9 +309,9 @@ class AppManager : AppCompatActivity() {
     override fun supportNavigateUpTo(upIntent: Intent) =
             super.supportNavigateUpTo(upIntent.addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP))
 
-    override fun onKeyUp(keyCode: Int, event: KeyEvent?) = if (keyCode == KeyEvent.KEYCODE_MENU)
+    override fun onKeyUp(keyCode: Int, event: KeyEvent?) = if (keyCode == KeyEvent.KEYCODE_MENU) {
         if (toolbar.isOverflowMenuShowing) toolbar.hideOverflowMenu() else toolbar.showOverflowMenu()
-    else super.onKeyUp(keyCode, event)
+    } else super.onKeyUp(keyCode, event)
 
     override fun onDestroy() {
         instance = null

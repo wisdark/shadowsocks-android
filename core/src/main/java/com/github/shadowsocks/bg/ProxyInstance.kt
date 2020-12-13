@@ -21,8 +21,6 @@
 package com.github.shadowsocks.bg
 
 import android.content.Context
-import android.util.Base64
-import com.github.shadowsocks.Core
 import com.github.shadowsocks.acl.Acl
 import com.github.shadowsocks.acl.AclSyncer
 import com.github.shadowsocks.database.Profile
@@ -30,16 +28,13 @@ import com.github.shadowsocks.plugin.PluginConfiguration
 import com.github.shadowsocks.plugin.PluginManager
 import com.github.shadowsocks.preference.DataStore
 import com.github.shadowsocks.utils.parseNumericAddress
-import com.github.shadowsocks.utils.signaturesCompat
-import com.github.shadowsocks.utils.useCancellable
-import com.google.firebase.remoteconfig.ktx.get
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
+import org.json.JSONArray
 import java.io.File
 import java.io.IOException
-import java.net.*
-import java.security.MessageDigest
+import java.net.URI
+import java.net.URISyntaxException
+import java.net.UnknownHostException
 
 /**
  * This class sets up environment for ss-local.
@@ -48,40 +43,8 @@ class ProxyInstance(val profile: Profile, private val route: String = profile.ro
     private var configFile: File? = null
     var trafficMonitor: TrafficMonitor? = null
     val plugin by lazy { PluginManager.init(PluginConfiguration(profile.plugin ?: "")) }
-    private var scheduleConfigUpdate = false
 
     suspend fun init(service: BaseService.Interface) {
-        if (profile.isSponsored) {
-            scheduleConfigUpdate = true
-            val mdg = MessageDigest.getInstance("SHA-1")
-            mdg.update(Core.packageInfo.signaturesCompat.first().toByteArray())
-            val (config, success) = RemoteConfig.fetch()
-            scheduleConfigUpdate = !success
-            val conn = withContext(Dispatchers.IO) {
-                // Network.openConnection might use networking, see https://issuetracker.google.com/issues/135242093
-                service.openConnection(URL(config["proxy_url"].asString())) as HttpURLConnection
-            }
-            conn.requestMethod = "POST"
-            conn.doOutput = true
-
-            val proxies = conn.useCancellable {
-                try {
-                    outputStream.bufferedWriter().use {
-                        it.write("sig=" + Base64.encodeToString(mdg.digest(), Base64.DEFAULT))
-                    }
-                    inputStream.bufferedReader().readText()
-                } catch (e: IOException) {
-                    throw BaseService.ExpectedExceptionWrapper(e)
-                }
-            }.split('|').toMutableList()
-            proxies.shuffle()
-            val proxy = proxies.first().split(':')
-            profile.host = proxy[0].trim()
-            profile.remotePort = proxy[1].trim().toInt()
-            profile.password = proxy[2].trim()
-            profile.method = proxy[3].trim()
-        }
-
         // it's hard to resolve DNS on a specific interface so we'll do it here
         if (profile.host.parseNumericAddress() == null) {
             profile.host = try {
@@ -102,8 +65,10 @@ class ProxyInstance(val profile: Profile, private val route: String = profile.ro
 
         this.configFile = configFile
         val config = profile.toJson()
-        plugin?.let { (path, opts) ->
-            if (service.isVpnService) opts["V"] = ""
+        plugin?.let { (path, opts, isV2) ->
+            if (service.isVpnService) {
+                if (isV2) opts["__android_vpn"] = "" else config.put("plugin_args", JSONArray(arrayOf("-V")))
+            }
             config.put("plugin", path).put("plugin_opts", opts.toString())
         }
         config.put("local_address", DataStore.listenAddress)
@@ -136,7 +101,6 @@ class ProxyInstance(val profile: Profile, private val route: String = profile.ro
 
     fun scheduleUpdate() {
         if (route !in arrayOf(Acl.ALL, Acl.CUSTOM_RULES)) AclSyncer.schedule(route)
-        if (scheduleConfigUpdate) RemoteConfig.fetchAsync()
     }
 
     fun shutdown(scope: CoroutineScope) {
