@@ -20,7 +20,6 @@
 
 package com.github.shadowsocks
 
-import android.annotation.SuppressLint
 import android.content.ActivityNotFoundException
 import android.content.Intent
 import android.graphics.Bitmap
@@ -37,6 +36,7 @@ import android.widget.ImageView
 import android.widget.TextView
 import androidx.activity.result.ActivityResultLauncher
 import androidx.appcompat.widget.PopupMenu
+import androidx.appcompat.widget.SearchView
 import androidx.appcompat.widget.Toolbar
 import androidx.appcompat.widget.TooltipCompat
 import androidx.core.os.bundleOf
@@ -48,7 +48,7 @@ import com.github.shadowsocks.bg.BaseService
 import com.github.shadowsocks.database.Profile
 import com.github.shadowsocks.database.ProfileManager
 import com.github.shadowsocks.plugin.PluginConfiguration
-import com.github.shadowsocks.plugin.showAllowingStateLoss
+import com.github.shadowsocks.plugin.fragment.showAllowingStateLoss
 import com.github.shadowsocks.preference.DataStore
 import com.github.shadowsocks.utils.Action
 import com.github.shadowsocks.utils.OpenJson
@@ -64,7 +64,7 @@ import com.google.zxing.WriterException
 import timber.log.Timber
 import java.nio.charset.StandardCharsets
 
-class ProfilesFragment : ToolbarFragment(), Toolbar.OnMenuItemClickListener {
+class ProfilesFragment : ToolbarFragment(), Toolbar.OnMenuItemClickListener, SearchView.OnQueryTextListener {
     companion object {
         /**
          * used for callback from stateChanged from MainActivity
@@ -84,7 +84,6 @@ class ProfilesFragment : ToolbarFragment(), Toolbar.OnMenuItemClickListener {
     private fun isProfileEditable(id: Long) =
             (activity as MainActivity).state == BaseService.State.Stopped || id !in Core.activeProfileIds
 
-    @SuppressLint("ValidFragment")
     class QRCodeDialog() : DialogFragment() {
         constructor(url: String) : this() {
             arguments = bundleOf(Pair(KEY_URL, url))
@@ -237,6 +236,17 @@ class ProfilesFragment : ToolbarFragment(), Toolbar.OnMenuItemClickListener {
             notifyItemInserted(pos)
         }
 
+        fun filter(name: String) {
+            val active = ProfileManager.getActiveProfiles()?.toMutableList() ?: mutableListOf()
+            profiles.clear()
+            val locale = resources.configuration.locale
+            val lower = name.lowercase(locale)
+            profiles.addAll(active.filter {
+                it.name?.lowercase(locale)?.contains(lower) == true || it.host.lowercase(locale).contains(lower)
+            })
+            notifyDataSetChanged()
+        }
+
         fun move(from: Int, to: Int) {
             undoManager.flush()
             val first = profiles[from]
@@ -322,6 +332,13 @@ class ProfilesFragment : ToolbarFragment(), Toolbar.OnMenuItemClickListener {
         startActivity(Intent(context, ProfileConfigActivity::class.java).putExtra(Action.EXTRA_PROFILE_ID, profile.id))
     }
 
+    override fun onQueryTextChange(query: String): Boolean {
+        profilesAdapter.filter(query)
+        return false
+    }
+
+    override fun onQueryTextSubmit(query: String): Boolean = false
+
     override fun onCreateView(inflater: LayoutInflater, container: ViewGroup?, savedInstanceState: Bundle?): View? =
             inflater.inflate(R.layout.layout_list, container, false)
 
@@ -331,6 +348,10 @@ class ProfilesFragment : ToolbarFragment(), Toolbar.OnMenuItemClickListener {
         toolbar.setTitle(R.string.profiles)
         toolbar.inflateMenu(R.menu.profile_manager_menu)
         toolbar.setOnMenuItemClickListener(this)
+        val searchView = toolbar.findViewById<SearchView>(R.id.action_search)
+        searchView.setOnQueryTextListener(this)
+        searchView.queryHint = getString(android.R.string.search_go)
+
         ProfileManager.ensureNotEmpty()
         profilesList = view.findViewById(R.id.list)
         ViewCompat.setOnApplyWindowInsetsListener(profilesList, MainListListener)

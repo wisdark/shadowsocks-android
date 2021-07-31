@@ -27,6 +27,7 @@ import android.view.View
 import android.view.ViewGroup
 import android.widget.CompoundButton
 import android.widget.TextView
+import androidx.fragment.app.setFragmentResult
 import androidx.leanback.preference.LeanbackListPreferenceDialogFragmentCompat
 import androidx.recyclerview.widget.RecyclerView
 import com.github.shadowsocks.Core
@@ -43,10 +44,10 @@ class ProfilesDialogFragment : LeanbackListPreferenceDialogFragmentCompat() {
         }
 
         override fun onClick(v: View) {
-            val index = adapterPosition
+            val index = bindingAdapterPosition
             if (index == RecyclerView.NO_POSITION) return
             Core.switchProfile(adapter.profiles[index].id)
-            (targetFragment as MainPreferenceFragment).startService()
+            setFragmentResult(ProfilesDialogFragment::class.java.name, Bundle.EMPTY)
             parentFragmentManager.popBackStack()
             adapter.notifyDataSetChanged()
         }

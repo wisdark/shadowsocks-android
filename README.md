@@ -19,7 +19,11 @@ for Android TV ([beta](https://play.google.com/apps/testing/com.github.shadowsoc
 * Android SDK
   - Android NDK
 * Rust with Android targets installed  
-  `$ rustup target install armv7-linux-androideabi aarch64-linux-android i686-linux-android x86_64-linux-android`
+
+```bash
+  $ cd core/src/main/rust/shadowsocks-rust
+  $ rustup target add armv7-linux-androideabi aarch64-linux-android i686-linux-android x86_64-linux-android
+```
 
 ### BUILD
 

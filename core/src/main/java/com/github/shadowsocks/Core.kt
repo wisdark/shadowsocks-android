@@ -73,8 +73,12 @@ object Core : Configuration.Provider {
     val packageInfo: PackageInfo by lazy { getPackageInfo(app.packageName) }
     val deviceStorage by lazy { if (Build.VERSION.SDK_INT < 24) app else DeviceStorageApp(app) }
     val directBootSupported by lazy {
-        Build.VERSION.SDK_INT >= 24 && app.getSystemService<DevicePolicyManager>()?.storageEncryptionStatus ==
-                DevicePolicyManager.ENCRYPTION_STATUS_ACTIVE_PER_USER
+        Build.VERSION.SDK_INT >= 24 && try {
+            app.getSystemService<DevicePolicyManager>()?.storageEncryptionStatus ==
+                    DevicePolicyManager.ENCRYPTION_STATUS_ACTIVE_PER_USER
+        } catch (_: RuntimeException) {
+            false
+        }
     }
 
     val activeProfileIds get() = ProfileManager.getProfile(DataStore.profileId).let {
@@ -141,6 +145,7 @@ object Core : Configuration.Provider {
     }
 
     override fun getWorkManagerConfiguration() = Configuration.Builder().apply {
+        setDefaultProcessName(app.packageName + ":bg")
         setMinimumLoggingLevel(if (BuildConfig.DEBUG) Log.VERBOSE else Log.INFO)
         setExecutor { GlobalScope.launch { it.run() } }
         setTaskExecutor { GlobalScope.launch { it.run() } }

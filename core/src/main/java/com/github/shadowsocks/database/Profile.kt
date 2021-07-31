@@ -36,7 +36,7 @@ import com.google.gson.JsonArray
 import com.google.gson.JsonElement
 import com.google.gson.JsonObject
 import com.google.gson.JsonPrimitive
-import kotlinx.android.parcel.Parcelize
+import kotlinx.parcelize.Parcelize
 import org.json.JSONArray
 import org.json.JSONObject
 import timber.log.Timber
@@ -114,7 +114,7 @@ data class Profile(
                     if (match != null) {
                         val profile = Profile()
                         feature?.copyFeatureSettingsTo(profile)
-                        profile.method = match.groupValues[1].toLowerCase(Locale.ENGLISH)
+                        profile.method = match.groupValues[1].lowercase(Locale.ENGLISH)
                         profile.password = match.groupValues[2]
                         profile.host = match.groupValues[3]
                         profile.remotePort = match.groupValues[4].toInt()

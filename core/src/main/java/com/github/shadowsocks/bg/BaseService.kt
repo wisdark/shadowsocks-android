@@ -50,7 +50,6 @@ import timber.log.Timber
 import java.io.File
 import java.io.IOException
 import java.net.URL
-import java.net.UnknownHostException
 
 /**
  * This object uses WeakMap to simulate the effects of multi-inheritance.
@@ -222,13 +221,6 @@ object BaseService {
         fun onBind(intent: Intent): IBinder? = if (intent.action == Action.SERVICE) data.binder else null
 
         fun forceLoad() {
-            val (profile, fallback) = Core.currentProfile
-                    ?: return stopRunner(false, (this as Context).getString(R.string.profile_empty))
-            if (profile.host.isEmpty() || profile.password.isEmpty() ||
-                    fallback != null && (fallback.host.isEmpty() || fallback.password.isEmpty())) {
-                stopRunner(false, (this as Context).getString(R.string.proxy_empty))
-                return
-            }
             val s = data.state
             when {
                 s == State.Stopped -> startRunner()
@@ -246,13 +238,13 @@ object BaseService {
             data.proxy!!.start(this,
                     File(Core.deviceStorage.noBackupFilesDir, "stat_main"),
                     File(configRoot, CONFIG_FILE),
-                    if (udpFallback == null && data.proxy?.plugin == null) "-U" else null)
+                    if (udpFallback == null && data.proxy?.plugin == null) "tcp_and_udp" else "tcp_only")
             if (udpFallback?.plugin != null) throw ExpectedExceptionWrapper(IllegalStateException(
                     "UDP fallback cannot have plugins"))
             udpFallback?.start(this,
                     File(Core.deviceStorage.noBackupFilesDir, "stat_udp"),
                     File(configRoot, CONFIG_FILE_UDP),
-                    "-u", false)
+                    "udp_only", false)
             data.localDns = LocalDnsWorker(this::rawResolver).apply { start() }
         }
 
@@ -316,7 +308,6 @@ object BaseService {
                 listOfNotNull(data.proxy, data.udpFallback).forEach { it.trafficMonitor?.persistStats(it.profile.id) }
 
         suspend fun preInit() { }
-        suspend fun resolver(host: String) = DnsResolverCompat.resolveOnActiveNetwork(host)
         suspend fun rawResolver(query: ByteArray) = DnsResolverCompat.resolveRawOnActiveNetwork(query)
         suspend fun openConnection(url: URL) = url.openConnection()
 
@@ -332,10 +323,14 @@ object BaseService {
                 return Service.START_NOT_STICKY
             }
             val (profile, fallback) = expanded
-            profile.name = profile.formattedName    // save name for later queries
-            val proxy = ProxyInstance(profile)
-            data.proxy = proxy
-            data.udpFallback = if (fallback == null) null else ProxyInstance(fallback, profile.route)
+            try {
+                data.proxy = ProxyInstance(profile)
+                data.udpFallback = if (fallback == null) null else ProxyInstance(fallback, profile.route)
+            } catch (e: IllegalArgumentException) {
+                data.notification = createNotification("")
+                stopRunner(false, e.message)
+                return Service.START_NOT_STICKY
+            }
 
             BootReceiver.enabled = DataStore.persistAcrossReboot
             if (!data.closeReceiverRegistered) {
@@ -355,8 +350,6 @@ object BaseService {
                 try {
                     Executable.killAll()    // clean up old processes
                     preInit()
-                    proxy.init(this@Interface)
-                    data.udpFallback?.init(this@Interface)
                     if (profile.route == Acl.CUSTOM_RULES) try {
                         withContext(Dispatchers.IO) {
                             Acl.customRules.flatten(10, this@Interface::openConnection).also {
@@ -373,14 +366,12 @@ object BaseService {
                     }
                     startProcesses()
 
-                    proxy.scheduleUpdate()
+                    data.proxy!!.scheduleUpdate()
                     data.udpFallback?.scheduleUpdate()
 
                     data.changeState(State.Connected)
                 } catch (_: CancellationException) {
                     // if the job was cancelled, it is canceller's responsibility to call stopRunner
-                } catch (_: UnknownHostException) {
-                    stopRunner(false, getString(R.string.invalid_server))
                 } catch (exc: Throwable) {
                     if (exc is ExpectedException) Timber.d(exc) else Timber.w(exc)
                     stopRunner(false, "${getString(R.string.service_failed)}: ${exc.readableMessage}")
