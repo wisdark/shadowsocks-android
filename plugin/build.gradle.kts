@@ -7,19 +7,7 @@ plugins {
 
 setupCommon()
 
-android {
-    defaultConfig {
-        versionCode = findProperty("VERSION_CODE").toString().toInt()
-        versionName = findProperty("VERSION_NAME").toString()
-    }
-
-    lintOptions.informational("GradleDependency")
-}
-
-mavenPublish.targets.getByName("uploadArchives") {
-    repositoryUsername = findProperty("NEXUS_USERNAME").toString()
-    repositoryPassword = findProperty("NEXUS_PASSWORD").toString()
-}
+android.lintOptions.informational("GradleDependency")
 
 dependencies {
     api(kotlin("stdlib-jdk8"))

@@ -14,10 +14,8 @@
     <uses-permission android:name="android.permission.INTERNET"/>
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED"/>
     <uses-permission android:name="android.permission.WAKE_LOCK"/>
-    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE"/>
-
-    <uses-feature android:name="android.software.leanback"
-                  android:required="false"/>
+    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE"
+                     android:maxSdkVersion="28"/>
 
     <queries>
         <intent>
@@ -77,6 +75,7 @@
         <activity
             android:name="com.github.shadowsocks.UrlImportActivity"
             android:theme="@style/Theme.AppCompat.Translucent"
+            android:exported="true"
             android:excludeFromRecents="true">
             <intent-filter>
                 <action android:name="android.intent.action.VIEW"/>
@@ -89,12 +88,14 @@
         <activity
             android:name="com.github.shadowsocks.VpnRequestActivity"
             android:theme="@style/Theme.AppCompat.Translucent"
+            android:exported="false"
             android:excludeFromRecents="true"
             android:taskAffinity=""/>
 
         <receiver android:name="com.github.shadowsocks.BootReceiver"
                   android:process=":bg"
                   android:directBootAware="true"
+                  android:exported="true"
                   android:enabled="false">
             <intent-filter>
                 <action android:name="android.intent.action.BOOT_COMPLETED"/>
