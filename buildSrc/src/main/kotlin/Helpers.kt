@@ -1,5 +1,6 @@
 
 import com.android.build.VariantOutput
+import com.android.build.api.dsl.CommonExtension
 import com.android.build.gradle.AbstractAppExtension
 import com.android.build.gradle.BaseExtension
 import com.android.build.gradle.internal.api.ApkVariantOutputImpl
@@ -11,9 +12,10 @@ import org.gradle.kotlin.dsl.getByName
 import org.jetbrains.kotlin.gradle.dsl.KotlinJvmOptions
 import java.util.*
 
-const val lifecycleVersion = "2.4.0-beta01"
+const val lifecycleVersion = "2.5.0"
 
 private val Project.android get() = extensions.getByName<BaseExtension>("android")
+private val BaseExtension.lint get() = (this as CommonExtension<*, *, *, *>).lint
 
 private val flavorRegex = "(assemble|generate)\\w*(Release|Debug)".toRegex()
 val Project.currentFlavor get() = gradle.startParameter.taskRequests.toString().let { task ->
@@ -24,11 +26,11 @@ val Project.currentFlavor get() = gradle.startParameter.taskRequests.toString().
 
 fun Project.setupCommon() {
     android.apply {
-        buildToolsVersion("31.0.0")
-        compileSdkVersion(31)
+        buildToolsVersion("33.0.0")
+        compileSdkVersion(33)
         defaultConfig {
             minSdk = 23
-            targetSdk = 31
+            targetSdk = 33
             testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         }
         val javaVersion = JavaVersion.VERSION_11
@@ -36,10 +38,11 @@ fun Project.setupCommon() {
             sourceCompatibility = javaVersion
             targetCompatibility = javaVersion
         }
-        lintOptions {
-            warning("ExtraTranslation")
-            warning("ImpliedQuantity")
-            informational("MissingTranslation")
+        lint.apply {
+            warning += "ExtraTranslation"
+            warning += "ImpliedQuantity"
+            informational += "MissingQuantity"
+            informational += "MissingTranslation"
         }
         (this as ExtensionAware).extensions.getByName<KotlinJvmOptions>("kotlinOptions").jvmTarget =
                 javaVersion.toString()
@@ -56,18 +59,18 @@ fun Project.setupCore() {
     setupCommon()
     android.apply {
         defaultConfig {
-            versionCode = 5020650
-            versionName = "5.2.6-nightly"
+            versionCode = 5030150
+            versionName = "5.3.1-nightly"
         }
         compileOptions.isCoreLibraryDesugaringEnabled = true
-        lintOptions {
-            disable("BadConfigurationProvider")
-            warning("RestrictedApi")
-            disable("UseAppTint")
+        lint.apply {
+            disable += "BadConfigurationProvider"
+            warning += "RestrictedApi"
+            disable += "UseAppTint"
         }
         ndkVersion = "21.4.7075529"
     }
-    dependencies.add("coreLibraryDesugaring", "com.android.tools:desugar_jdk_libs:1.1.5")
+    dependencies.add("coreLibraryDesugaring", "com.android.tools:desugar_jdk_libs:1.1.6")
 }
 
 private val abiCodes = mapOf("armeabi-v7a" to 1, "arm64-v8a" to 2, "x86" to 3, "x86_64" to 4)
@@ -77,6 +80,7 @@ fun Project.setupApp() {
     android.apply {
         defaultConfig.resourceConfigurations.addAll(listOf(
             "ar",
+            "de",
             "es",
             "fa",
             "fr",
@@ -84,6 +88,7 @@ fun Project.setupApp() {
             "ko",
             "ru",
             "tr",
+            "uk",
             "zh-rCN",
             "zh-rTW",
         ))
@@ -97,11 +102,8 @@ fun Project.setupApp() {
                 proguardFile(getDefaultProguardFile("proguard-android.txt"))
             }
         }
-        lintOptions.disable("RemoveWorkManagerInitializer")
-        packagingOptions {
-            excludes.add("**/*.kotlin_*")
-            jniLibs.useLegacyPackaging = true
-        }
+        lint.disable += "RemoveWorkManagerInitializer"
+        packagingOptions.jniLibs.useLegacyPackaging = true
         splits.abi {
             isEnable = true
             isUniversalApk = true
